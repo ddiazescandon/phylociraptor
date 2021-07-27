@@ -14,33 +14,19 @@ def get_assemblies(wildcards):
 	else:
 		return []
 
-def select_species(dir="results/assemblies"):
-	sps = [sp.split("/")[-1].split(".fna")[0] for sp in glob.glob(dir+"/*fna*")]
-#	print("Species ("+str(len(sps))+"):"+str(sps))
-	if config["exclude_orthology"]:
-		blacklist = []
-		with open(config["exclude_orthology"]) as file:
-			blacklist = [line.strip() for line in file]
-#		print("blacklist: "+str(blacklist))
-		for i in reversed(range(len(sps))):
-			if sps[i] in blacklist:
-				del(sps[i])
-#		print("Species ("+str(len(sps))+"): "+str(sps))
-	return sps
-
-species = select_species()
-
 rule run_busco:
 	input:
 		#assembly = "results/assemblies/{species}.fna",
 		assembly = get_assemblies,
 		augustus_config_path = "results/augustus_config_path",
-		busco_set = "results/busco_set"
+		busco_set = "results/busco_set/"+config["busco"]["set"]
 	output:
 		checkpoint = "results/checkpoints/busco/busco_{species}.done",
 		augustus_output = "results/busco/{species}/run_busco/augustus_output.tar.gz",
 		blast_output = "results/busco/{species}/run_busco/blast_output.tar.gz",
 		hmmer_output = "results/busco/{species}/run_busco/hmmer_output.tar.gz",
+		logs = "results/busco/{species}/run_busco/logs.tar.gz",
+		# augustus_model = "results/busco/{species}/run_busco/{species}_augustus_model.tar.gz",
 		full_table = "results/busco/{species}/run_busco/full_table_busco.tsv",
 		short_summary ="results/busco/{species}/run_busco/short_summary_busco.txt",
 		missing_busco_list ="results/busco/{species}/run_busco/missing_busco_list_busco.tsv",
@@ -55,9 +41,12 @@ rule run_busco:
 		wd = os.getcwd(),
 		sp = config["busco"]["augustus_species"],
 		additional_params = config["busco"]["additional_parameters"],
-		species = lambda wildcards: wildcards.species
+		species = lambda wildcards: wildcards.species,
+		mode = "genome",
+		augustus_config_in_container = "/usr/local/config",
+		set = config["busco"]["set"]
 	singularity:
-		"docker://reslp/busco:3.0.2"
+		"docker://ezlabgva/busco:v5.2.1_cv1"
 	shell:
 		"""
 		mkdir -p log
@@ -65,23 +54,25 @@ rule run_busco:
 		# prepare stripped down version auf augustus config path.
 		# this is introduced to lower the number of files.
 		mkdir augustus
-		cp -R /opt/conda/config/cgp augustus
-		cp /opt/conda/config/config.ini augustus
-		cp -R /opt/conda/config/extrinsic augustus
-		cp -R /opt/conda/config/model augustus
-		cp -R /opt/conda/config/profile augustus
+		cp -R {params.augustus_config_in_container}/cgp augustus
+		cp -R {params.augustus_config_in_container}/extrinsic augustus
+		cp -R {params.augustus_config_in_container}/model augustus
+		cp -R {params.augustus_config_in_container}/profile augustus
 		mkdir augustus/species
+		cp -R {params.augustus_config_in_container}/species/generic augustus/species/
 		
-		if [ -d /opt/conda/config/species/{params.sp} ]
+		if [ -d {params.augustus_config_in_container}/species/{params.sp} ]
 		then
-			cp -R /opt/conda/config/species/{params.sp} augustus/species
+			cp -R {params.augustus_config_in_container}/species/{params.sp} augustus/species
 		fi		
 
 		export AUGUSTUS_CONFIG_PATH=$(pwd)/augustus
+		#export AUGUSTUS_SCRIPTS_PATH=/usr/local/bin/ #might be necessary in ezlabgva/busco:v5.2.1_cv1 image
+		#export AUGUSTUS_BIN_PATH=/usr/local/bin/
 		echo $AUGUSTUS_CONFIG_PATH
 		
 		# handle gzipped and other assemblies differently
-		if echo $(file $(readlink -f "{input.assembly}")) | grep compressed ;
+		if [[ "{input.assembly}" =~ \.gz$ ]]
 		then
 			fullname=$(basename "{input.assembly}")
 			filename="${{fullname%.*}}"
@@ -89,25 +80,26 @@ rule run_busco:
 		else
 			filename="{input.assembly}"
 		fi
-		echo "Assembly used for BUSCO is "$filename 2>&1 | tee {log}
-		run_busco -i $filename -f --out busco -c {threads} -sp {params.sp} --lineage_path {input.busco_set} -m genome {params.additional_params} 2>&1 | tee {log}
+		#echo "Assembly used for BUSCO is "$filename 2>&1 | tee {log}
+		busco -i $filename -f --out {params.species} -c {threads} --augustus --augustus_species {params.sp} --lineage_dataset $(pwd)/{input.busco_set} -m {params.mode} {params.additional_params} 2>&1 | tee {log}
 		# do some cleanup to save space
-		bin/tar_folder.sh {output.blast_output} run_busco/blast_output
-		bin/tar_folder.sh {output.hmmer_output} run_busco/hmmer_output
-		bin/tar_folder.sh {output.augustus_output} run_busco/augustus_output
-		tar -pcf {output.single_copy_buscos} -C run_busco/ single_copy_busco_sequences 
+		basedir=$(pwd)
+		cd {params.species}/run_{params.set}
+		$basedir/bin/tar_folder.sh $basedir/{output.blast_output} blast_output
+		$basedir/bin/tar_folder.sh $basedir/{output.hmmer_output} hmmer_output
+		$basedir/bin/tar_folder.sh $basedir/{output.augustus_output} augustus_output
+		cd ..
+		$basedir/bin/tar_folder.sh $basedir/{output.logs} logs
+		cd ..
+		tar -pcf {output.single_copy_buscos} -C {params.species}/run_{params.set}/busco_sequences single_copy_busco_sequences 
 		tar -tvf {output.single_copy_buscos} > {output.single_copy_buscos_tarlist}	
-		
+
 		#move output files:
-		#mv run_busco/augustus_output.tar.gz {output.augustus_output}
-		#mv run_busco/blast_output.tar.gz {output.blast_output}
-		#mv run_busco/hmmer_output.tar.gz {output.hmmer_output}
-		mv run_busco/full_table_busco.tsv {output.full_table}
-		mv run_busco/short_summary_busco.txt {output.short_summary}
-		mv run_busco/missing_busco_list_busco.tsv {output.missing_busco_list}
-		#mv run_busco/single_copy_busco_sequences {output.single_copy_buscos}
+		mv {params.species}/run_{params.set}/full_table.tsv {output.full_table}
+		mv {params.species}/run_{params.set}/short_summary.txt {output.short_summary}
+		mv {params.species}/run_{params.set}/missing_busco_list.tsv {output.missing_busco_list}
 		
-		buscos=$(tail -n +6 results/busco/{params.species}/run_busco/full_table_busco.tsv | cut -f 2 | sort | uniq -c | tr '\\n' ' ' | sed 's/ $/\\n/g')
+		buscos=$(tail -n +6 {output.full_table} | cut -f 2 | sort | uniq -c | tr '\\n' ' ' | sed 's/ $/\\n/g')
 		name="{params.species}"
 		echo "$(date) $name $buscos" >> results/statistics/runlog.txt
 		
@@ -117,7 +109,7 @@ rule run_busco:
 
 rule busco:
 	input:
-		checks = expand("results/checkpoints/busco/busco_{species}.done", species=species)
+		checks = expand("results/checkpoints/busco/busco_{species}.done", species=glob_wildcards("results/assemblies/{species}.fna").species + glob_wildcards("results/assemblies/{species}.fna.gz").species)
 	output:
 		"results/checkpoints/busco.done"
 	shell:
@@ -127,7 +119,7 @@ rule busco:
 
 rule extract_busco_table:
 	input:
-		busco_set = "results/busco_set",
+		busco_set = "results/busco_set/"+config["busco"]["set"],
 		busco = rules.busco.output
 	output:
 		busco_table = "results/busco_table/busco_table.txt",
@@ -146,7 +138,7 @@ rule extract_busco_table:
 		"""
 rule orthology:
 	input:
-		expand("results/checkpoints/busco/busco_{species}.done", species=species),
+		expand("results/checkpoints/busco/busco_{species}.done", species=glob_wildcards("results/assemblies/{species}.fna").species),
 		#"results/checkpoints/busco.done",
 		"results/busco_table/busco_table.txt",
 		#"results/checkpoints/create_sequence_files.done",

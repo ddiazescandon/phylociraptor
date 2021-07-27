@@ -3,7 +3,7 @@
 destination=$1
 folder=$2
 
-tar -zcvf $destination $folder
+tar -zcf $destination $folder
 
 if [ ! $? -e 0 ]
 then

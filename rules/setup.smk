@@ -146,18 +146,20 @@ rule rename_assemblies:
 
 rule download_busco_set:
 	output:
-		busco_set = directory("results/busco_set"),
+		busco_set = directory("results/busco_set/"+config["busco"]["set"]),
 		checkpoint = "results/checkpoints/download_busco_set.done"
 	params:
-		set = config["busco"]["set"]
+		set = config["busco"]["set"],
+		base_url = "https://busco-data.ezlab.org/v5/data/lineages"
 	benchmark:
 		"results/statistics/benchmarks/setup/dowload_busco_set.txt"
 	shell:
 		"""
 		echo {params.set}
+		current=$(curl -s {params.base_url}/ | grep "{params.set}" | cut -d ">" -f 2 | sed 's/<.*//')
 		if [ -d {output.busco_set} ]; then rm -rf {output.busco_set}; fi
-		if [ ! -d {output.busco_set} ]; then mkdir {output.busco_set}; fi
-		wget -c {params.set} -O - | tar -xz --strip-components 1 -C {output.busco_set}/
+		if [ ! -d {output.busco_set} ]; then mkdir -p {output.busco_set}; fi
+		wget -c {params.base_url}/$current -O - | tar -xz --strip-components 1 -C {output.busco_set}/
 		touch {output.checkpoint}
 		"""
 
@@ -166,12 +168,14 @@ rule prepare_augustus:
 		augustus_config_path = directory("results/augustus_config_path"),
 		checkpoint = "results/checkpoints/prepare_augustus.done"
 	singularity:
-		"docker://reslp/busco:3.0.2"
+		"docker://ezlabgva/busco:v5.2.1_cv1"
+	params:
+		augustus_config_in_container = "/usr/local/config"
 	benchmark:
 		"results/statistics/benchmarks/setup/prepare_augustus.txt"
 	shell:
 		"""
-		cp -r /opt/conda/config {output.augustus_config_path}
+		cp -r {params.augustus_config_in_container} {output.augustus_config_path}
 		touch {output.checkpoint}
 		"""
 
