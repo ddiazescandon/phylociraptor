@@ -897,7 +897,7 @@ elif args.command=="report":
 			cmd += check_config_file(report_args.config_file)
 	else:
 		rcommand = """ rmarkdown::render('./bin/report.Rmd') """
-		cmd = ["singularity", "exec", "docker://reslp/rmarkdown:4.0.3", "Rscript", "-e", rcommand]
+		cmd = ["singularity", "exec", "-B", os.getcwd(), "docker://reslp/rmarkdown:4.0.3", "Rscript", "-e", rcommand]
 	#proc = subprocess.run(cmd)
 	for line in execute_command(cmd, report_args.verbose):
                 print(line, end="\r")
