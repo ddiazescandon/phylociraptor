@@ -1,3 +1,4 @@
+include: "functions.smk"
 import subprocess
 import glob
 import yaml
@@ -22,7 +23,11 @@ def determine_concurrency_limit():
 
 batches = determine_concurrency_limit()
 
-rule trim_trimal:
+
+aligners = get_aligners()		
+trimmers = get_trimmers()		
+
+rule trimal:
 		input:
 			checkpoint = "results/checkpoints/modes/align.done",
 			alignment = "results/alignments/full/{aligner}/{busco}_aligned.fas"
@@ -38,7 +43,7 @@ rule trim_trimal:
 			"""
 			trimal {params.trimmer} -in {input.alignment} -out {output.trimmed_alignment}
 			"""
-rule trim_aliscotri:
+rule aliscore:
 		input:
 			checkpoint = "results/checkpoints/modes/align.done",
 			alignment = "results/alignments/full/{aligner}/{busco}_aligned.fas"
@@ -181,12 +186,12 @@ rule get_filter_statistics:
 		mv results/statistics/statistics.txt {output.statistics_filtered}
 		"""
 
-rule all_filter_align:
+rule filter_align:
 	input:
 		#"results/checkpoints/get_all_trimmed_alignments.done",
-		checkpoint = expand("results/checkpoints/{aligner}_aggregate_align.done", aligner=config["alignment"]["method"]),
-		filtered = expand("results/statistics/filter-{aligner}-{alitrim}/statistics_filtered_{alitrim}_{aligner}-{batch}-"+str(config["concurrency"])+".txt", aligner=config["alignment"]["method"], alitrim=config["trimming"]["method"], batch=batches),
-		algntrim = expand("results/statistics/filter-{aligner}-{alitrim}/alignment_filter_information_{alitrim}_{aligner}.txt", aligner=config["alignment"]["method"], alitrim=config["trimming"]["method"])
+		checkpoint = expand("results/checkpoints/{aligner}_aggregate_align.done", aligner=aligners),
+		filtered = expand("results/statistics/filter-{aligner}-{alitrim}/statistics_filtered_{alitrim}_{aligner}-{batch}-"+str(config["concurrency"])+".txt", aligner=aligners, alitrim=trimmers, batch=batches),
+		algntrim = expand("results/statistics/filter-{aligner}-{alitrim}/alignment_filter_information_{alitrim}_{aligner}.txt", aligner=aligners, alitrim=trimmers)
 	output:
 		checkpoint = "results/checkpoints/modes/filter_align.done",
 		stats = "results/statistics/filtered-alignments-stats.txt"
